@@ -2,12 +2,13 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import IntegerType, DoubleType, LongType
 
+from config import RUTA_RAW, RUTA_STAGING, ANIO_MINIMO
+
 spark = SparkSession.builder \
     .appName("StreamingDataLake_Staging") \
     .getOrCreate()
 
-RUTA_RAW = "hdfs:///datalake/01_raw"
-RUTA_STAGING = "hdfs:///datalake/02_staging"
+# Las rutas se toman de config.py (por defecto hdfs:///datalake/...)
 
 # ---------------------------------------------------------
 # 1. LIMPIEZA DE TITLE.BASICS (IMDb)
@@ -27,7 +28,7 @@ df_peliculas_limpias = df_basics_raw \
         F.col("runtimeMinutes").cast(IntegerType()).alias("duracion_minutos"),
         F.col("genres").alias("generos_raw")
     ) \
-    .filter(F.col("anio_estreno").isNotNull() & (F.col("anio_estreno") >= 1980))
+    .filter(F.col("anio_estreno").isNotNull() & (F.col("anio_estreno") >= ANIO_MINIMO))
 
 df_peliculas_limpias.write.mode("overwrite").parquet(f"{RUTA_STAGING}/peliculas_limpias")
 
@@ -94,8 +95,11 @@ df_tmdb_limpio = df_tmdb_raw \
     .filter(F.col("imdb_id").isNotNull() & F.col("imdb_id").startswith("tt")) \
     .select(
         F.trim(F.col("imdb_id")).alias("id_pelicula"),
-        F.col("budget").cast(LongType()).alias("presupuesto_usd"),
-        F.col("revenue").cast(LongType()).alias("ingresos_usd"),
+        # Conversión segura: TMDB guarda los montos como texto decimal
+        # ("15000000.0" o incluso "1.5E7"). Pasar primero por DOUBLE evita que
+        # un cast directo a BIGINT devuelva NULL; los valores inválidos quedan NULL.
+        F.col("budget").cast(DoubleType()).cast(LongType()).alias("presupuesto_usd"),
+        F.col("revenue").cast(DoubleType()).cast(LongType()).alias("ingresos_usd"),
         F.col("original_language").alias("idioma_original"),
         F.col("production_countries").alias("pais_produccion")
     ) \
