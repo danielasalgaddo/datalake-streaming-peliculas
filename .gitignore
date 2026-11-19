@@ -219,4 +219,14 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-text # Datasets pesados data/ *.csv *.tsv *.gz *.parquet
+# Datasets pesados (no se versionan)
+data/
+data_cruda/
+*.tsv
+*.gz
+*.parquet
+*.csv
+# ...excepto los resultados agregados de KPIs, que son chicos y van al informe
+!resultados/*.csv
+logs/
+datalake_local/
