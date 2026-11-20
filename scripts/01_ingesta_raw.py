@@ -8,18 +8,25 @@ Reglas de gobierno que aplica:
     _metadata/manifiesto_ingesta.csv con fuente, tamaño, checksum MD5 y fecha.
   * Fallo temprano: si un comando HDFS falla, el script termina con error
     para que el orquestador no siga con datos incompletos.
+
+Corre en el host (lo invoca ./cluster.sh pipeline) y usa el cliente HDFS del
+contenedor dl-namenode: los archivos se envían por la entrada estándar
+("hdfs dfs -put -"), así que no hace falta copiarlos antes dentro del contenedor.
 """
 import argparse
 import csv
 import hashlib
 import io
 import os
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
 
-# Configura aquí la ruta local donde descargaste los 5 archivos de Drive
-RUTA_LOCAL = os.environ.get("RUTA_LOCAL", "./data_cruda")
+# Carpeta del host con los 5 archivos fuente (por defecto data_cruda/ en la raíz del repo)
+RAIZ_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RUTA_LOCAL = os.environ.get("RUTA_LOCAL", os.path.join(RAIZ_REPO, "data_cruda"))
+HDFS = "docker exec -i dl-namenode hdfs"
 RUTA_HDFS_RAW = "/datalake/01_raw"
 RUTA_HDFS_METADATA = "/datalake/_metadata"
 MANIFIESTO = f"{RUTA_HDFS_METADATA}/manifiesto_ingesta.csv"
@@ -35,7 +42,11 @@ FUENTES = {
 }
 
 
-def hdfs(comando, permitir_fallo=False):
+def hdfs(argumentos, permitir_fallo=False, entrada=None):
+    """Ejecuta `hdfs <argumentos>`; `entrada` es un archivo local enviado por stdin."""
+    comando = f"{HDFS} {argumentos}"
+    if entrada:
+        comando += f" < {shlex.quote(entrada)}"
     resultado = subprocess.run(comando, shell=True, capture_output=True, text=True)
     if resultado.returncode != 0 and not permitir_fallo:
         print(f"ERROR ejecutando: {comando}\n{resultado.stderr}")
@@ -44,7 +55,7 @@ def hdfs(comando, permitir_fallo=False):
 
 
 def existe_en_hdfs(ruta):
-    return hdfs(f"hdfs dfs -test -e {ruta}", permitir_fallo=True).returncode == 0
+    return hdfs(f"dfs -test -e {ruta}", permitir_fallo=True).returncode == 0
 
 
 def md5(ruta, bloque=8 * 1024 * 1024):
@@ -63,8 +74,8 @@ def main():
 
     # 1. Crear directorios en HDFS
     for fuente in FUENTES:
-        hdfs(f"hdfs dfs -mkdir -p {RUTA_HDFS_RAW}/{fuente}")
-    hdfs(f"hdfs dfs -mkdir -p {RUTA_HDFS_METADATA}")
+        hdfs(f"dfs -mkdir -p {RUTA_HDFS_RAW}/{fuente}")
+    hdfs(f"dfs -mkdir -p {RUTA_HDFS_METADATA}")
 
     # 2. Subir archivos y registrar metadatos técnicos
     registros = []
@@ -82,7 +93,7 @@ def main():
                 continue
 
             flag = "-f " if args.forzar else ""
-            hdfs(f"hdfs dfs -put {flag}{origen} {destino}")
+            hdfs(f"dfs -put {flag}- {destino}", entrada=origen)
             print(f"OK: {origen} -> {destino}")
             registros.append({
                 "fecha_ingesta_utc": fecha,
@@ -105,9 +116,9 @@ def main():
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(buffer.getvalue())
         if existe_en_hdfs(MANIFIESTO):
-            hdfs(f"hdfs dfs -appendToFile {tmp} {MANIFIESTO}")
+            hdfs(f"dfs -appendToFile - {MANIFIESTO}", entrada=tmp)
         else:
-            hdfs(f"hdfs dfs -put {tmp} {MANIFIESTO}")
+            hdfs(f"dfs -put - {MANIFIESTO}", entrada=tmp)
         os.remove(tmp)
 
     print(f"\nIngesta a zona RAW completada ({len(registros)} archivo(s) nuevos).")
