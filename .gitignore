@@ -230,3 +230,5 @@ data_cruda/
 !resultados/*.csv
 logs/
 datalake_local/
+# Salidas generadas por el pipeline (run_pipeline.sh hace cd scripts); se regeneran
+scripts/resultados/
