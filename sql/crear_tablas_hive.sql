@@ -1,7 +1,7 @@
 -- =====================================================================
 -- Tablas externas de Hive sobre la zona 03_curated (esquema estrella).
 -- Son EXTERNAL: borrar la tabla en Hive no borra los Parquet del lake.
--- Ejecutar con:  hive -f sql/crear_tablas_hive.sql   (o beeline -f ...)
+-- Ejecutar con:  ./cluster.sh hive   (beeline en el contenedor dl-hive-server)
 -- =====================================================================
 CREATE DATABASE IF NOT EXISTS streaming_curated
 COMMENT 'Zona 03_curated del Data Lake de adquisiciones de películas';

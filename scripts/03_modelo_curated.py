@@ -76,7 +76,11 @@ hechos = (base
 
 hechos.cache()
 
-(hechos.write.mode("overwrite")
+# repartition("decada") junta cada década en una sola tarea: se escribe un
+# archivo por partición en lugar de uno por cada combinación tarea-década, lo
+# que evita cientos de archivos chicos en HDFS (y acelera la escritura).
+(hechos.repartition("decada")
+ .write.mode("overwrite")
  .partitionBy("decada")
  .parquet(f"{RUTA_CURATED}/tabla_hechos_peliculas"))
 
@@ -108,10 +112,14 @@ dim_directores.write.mode("overwrite").parquet(f"{RUTA_CURATED}/dimension_direct
 # ---------------------------------------------------------
 # 5. REGISTRO DE EJECUCIÓN (metadatos operativos / linaje)
 # ---------------------------------------------------------
+# Las dimensiones se cuentan sobre los Parquet ya escritos (lectura de
+# metadatos) en lugar de recalcular explode/joins desde staging.
 conteos = [
     ("tabla_hechos_peliculas", hechos.count()),
-    ("dimension_generos", dim_generos.count()),
-    ("dimension_directores", dim_directores.count()),
+    ("dimension_generos",
+     spark.read.parquet(f"{RUTA_CURATED}/dimension_generos").count()),
+    ("dimension_directores",
+     spark.read.parquet(f"{RUTA_CURATED}/dimension_directores").count()),
 ]
 registro = spark.createDataFrame(
     [(fecha_proceso, "03_modelo_curated.py", t, n, float(umbral_p25)) for t, n in conteos],

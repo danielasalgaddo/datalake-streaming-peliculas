@@ -1,13 +1,10 @@
 """
 dashboard.py — Frontend del Data Lake de Adquisiciones (Streamlit).
 
-Muestra únicamente los CSV que generan los scripts del pipeline
-(04_kpis.py y 05_calidad_datos.py); no necesita Spark, HDFS ni Hive.
+Corre en el contenedor dl-dashboard (http://localhost:8501) y muestra
+únicamente los CSV que generan 04_kpis.py y 05_calidad_datos.py en
+scripts/resultados, montada en el contenedor como SALIDA_LOCAL (/datos).
 Si un archivo no existe, indica qué script hay que ejecutar.
-
-Uso (desde la raíz del repo):
-    streamlit run app/dashboard.py
-    SALIDA_LOCAL=/ruta/a/resultados streamlit run app/dashboard.py
 """
 import os
 from pathlib import Path
@@ -16,7 +13,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-RAIZ = Path(__file__).resolve().parent.parent
+CARPETA = Path(os.environ.get("SALIDA_LOCAL", "/datos"))
 AZUL, GRIS = "#2a78d6", "#898781"
 
 # clave -> (archivo que genera el pipeline, script que lo genera)
@@ -31,23 +28,8 @@ ARCHIVOS = {
 }
 
 
-def carpetas_candidatas():
-    """Dónde escriben los scripts su SALIDA_LOCAL (ver scripts/config.py).
-
-    run_pipeline.sh hace `cd scripts`, así que ./resultados queda en
-    scripts/resultados; si se corren desde la raíz, queda en ./resultados.
-    """
-    if os.environ.get("SALIDA_LOCAL"):
-        yield Path(os.environ["SALIDA_LOCAL"]).expanduser().resolve()
-    yield RAIZ / "scripts" / "resultados"
-    yield RAIZ / "resultados"
-
-
-def encontrar_resultados():
-    for carpeta in carpetas_candidatas():
-        if any((carpeta / archivo).exists() for archivo, _ in ARCHIVOS.values()):
-            return carpeta
-    return None
+def hay_resultados():
+    return any((CARPETA / archivo).exists() for archivo, _ in ARCHIVOS.values())
 
 
 @st.cache_data
@@ -64,8 +46,8 @@ def falta(clave):
     if datos[clave] is not None:
         return False
     archivo, script = ARCHIVOS[clave]
-    st.info(f"No se encontró `{archivo}`. Se genera al ejecutar `scripts/{script}` "
-            "(o el pipeline completo con `./run_pipeline.sh`).")
+    st.info(f"No se encontró `{archivo}`. Lo genera `scripts/{script}` al ejecutar "
+            "`./cluster.sh pipeline`.")
     return True
 
 
@@ -85,13 +67,11 @@ def barras_h(df, etiqueta, valor, titulo_eje, formato=",.0f", orden="-x", alto=N
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="Data Lake · Adquisiciones", page_icon="🎬", layout="wide")
 
-carpeta = encontrar_resultados()
 with st.sidebar:
     st.header("🎬 Data Lake")
     st.caption("Adquisiciones de películas · IMDb + TMDB")
     st.markdown("**Fuente de datos**")
-    st.code(str(carpeta.relative_to(RAIZ) if carpeta and carpeta.is_relative_to(RAIZ)
-                else carpeta or "— sin resultados —"), language=None)
+    st.code("scripts/resultados/", language=None)
     if st.button("Recargar datos"):
         st.cache_data.clear()
         st.rerun()
@@ -102,14 +82,12 @@ with st.sidebar:
 st.title("Adquisiciones de películas")
 st.caption("KPIs calculados sobre la zona 03_curated del Data Lake (arquitectura Medallion).")
 
-if carpeta is None:
-    buscadas = "\n".join(f"- `{c}`" for c in carpetas_candidatas())
-    st.warning("**Todavía no hay resultados del pipeline.** Ejecutá `./run_pipeline.sh` "
-               "(o los scripts 02 → 03 → 05 → 04 en modo local, ver README) y luego "
-               f"*Recargar datos*.\n\nSe buscaron los CSV en:\n{buscadas}", icon="⚠️")
+if not hay_resultados():
+    st.warning("**Todavía no hay resultados del pipeline.** Ejecutá `./cluster.sh pipeline` "
+               "y luego *Recargar datos*.", icon="⚠️")
     st.stop()
 
-datos = cargar(str(carpeta))
+datos = cargar(str(CARPETA))
 
 # --- Resumen ----------------------------------------------------------------
 cob = datos["cobertura"]
