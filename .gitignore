@@ -219,14 +219,12 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Datasets pesados (no se versionan)
-data/
+# Archivos fuente del Data Lake (pesados, no se versionan)
 data_cruda/
 *.tsv
 *.gz
 *.parquet
 *.csv
-# ...excepto los resultados agregados de KPIs, que son chicos y van al informe
-!resultados/*.csv
+# Salidas generadas por ./cluster.sh pipeline (logs, CSV y gráficos); se regeneran
 logs/
-datalake_local/
+scripts/resultados/

@@ -4,17 +4,16 @@ Configuración central del Data Lake.
 Todas las rutas y umbrales de negocio viven acá para que los scripts del
 pipeline usen exactamente los mismos valores que se documentan en el informe.
 
-La ruta base se puede cambiar con la variable de entorno DATALAKE_BASE, por
-ejemplo para correr el pipeline en modo local sin HDFS:
-
-    export DATALAKE_BASE=file:///home/usuario/datalake
+Los scripts de Spark corren dentro del cluster de Docker (docker-compose.yml):
+el Data Lake vive en el HDFS del servicio namenode y los CSV de resultados se
+escriben en la carpeta scripts/resultados, montada desde el host.
 """
 import os
 
 # ---------------------------------------------------------------------------
 # Rutas de las zonas
 # ---------------------------------------------------------------------------
-BASE = os.environ.get("DATALAKE_BASE", "hdfs:///datalake").rstrip("/")
+BASE = "hdfs://namenode:9000/datalake"
 
 RUTA_RAW = f"{BASE}/01_raw"
 RUTA_STAGING = f"{BASE}/02_staging"
@@ -22,9 +21,10 @@ RUTA_CURATED = f"{BASE}/03_curated"
 RUTA_KPIS = f"{RUTA_CURATED}/kpis"
 RUTA_METADATA = f"{BASE}/_metadata"
 
-# Carpeta local donde se dejan los CSV chicos con los resultados de los KPIs
-# (los que se usan en Power BI y en las tablas del informe).
-SALIDA_LOCAL = os.environ.get("SALIDA_LOCAL", "./resultados")
+# Carpeta donde se dejan los CSV chicos con los resultados de los KPIs (los que
+# se usan en Power BI, en el dashboard y en las tablas del informe). Es
+# scripts/resultados en el host, montada en los contenedores de Spark.
+SALIDA_LOCAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resultados")
 
 # ---------------------------------------------------------------------------
 # Reglas de negocio (deben coincidir con el informe)

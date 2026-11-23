@@ -1,0 +1,124 @@
+# Cluster del Data Lake en Docker.
+#
+# Basado en https://github.com/Marcel-Jan/docker-hadoop-spark (HDFS + Hive de
+# bde2020), con estos cambios:
+#   * Spark 3.5 (imagen oficial apache/spark) en lugar de bde2020 Spark 3.0:
+#     el pipeline usa F.percentile_approx (Spark >= 3.1) y pandas en el driver.
+#   * Sin YARN, history server ni Presto: el pipeline no los usa (Spark corre
+#     en modo standalone) y así el cluster entra en la memoria de una laptop.
+#   * Dashboard Streamlit como servicio.
+#
+# No se usa directamente: ./cluster.sh up | pipeline | hive | down  (ver README)
+
+services:
+  # ------------------------------------------------------------------ HDFS
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    platform: linux/amd64
+    container_name: dl-namenode
+    restart: unless-stopped
+    ports:
+      - "9870:9870"   # UI de HDFS
+      - "9010:9000"   # RPC de HDFS desde el host (dentro de la red: namenode:9000)
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+    environment:
+      CLUSTER_NAME: datalake-streaming
+    env_file: ./docker/hadoop.env
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    platform: linux/amd64
+    container_name: dl-datanode
+    restart: unless-stopped
+    ports:
+      - "9864:9864"
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    env_file: ./docker/hadoop.env
+
+  # ----------------------------------------------------------------- Spark
+  spark-master:
+    build: ./docker/spark
+    image: datalake-spark:3.5.3
+    container_name: dl-spark-master
+    user: root
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    depends_on: [namenode, datanode]
+    ports:
+      - "8080:8080"   # UI del master
+      - "7077:7077"
+      - "4040:4040"   # UI del job en ejecución (el driver corre en este contenedor)
+    environment:
+      SPARK_MASTER_HOST: spark-master
+    volumes:
+      - ./scripts:/opt/proyecto/scripts   # código + scripts/resultados (salida de CSV)
+
+  spark-worker-1:
+    image: datalake-spark:3.5.3
+    container_name: dl-spark-worker-1
+    user: root
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker",
+              "spark://spark-master:7077"]
+    depends_on: [spark-master]
+    ports:
+      - "8081:8081"
+    environment:
+      SPARK_WORKER_CORES: "${SPARK_WORKER_CORES:-6}"
+      SPARK_WORKER_MEMORY: "${SPARK_WORKER_MEMORY:-4g}"
+    volumes:
+      - ./scripts:/opt/proyecto/scripts
+
+  # ------------------------------------------------------------------ Hive
+  hive-server:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    platform: linux/amd64
+    container_name: dl-hive-server
+    restart: unless-stopped
+    depends_on: [namenode, datanode, hive-metastore]
+    ports:
+      - "10000:10000"   # JDBC / beeline
+    environment:
+      HIVE_CORE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore/metastore"
+      SERVICE_PRECONDITION: "hive-metastore:9083"
+    env_file: ./docker/hadoop-hive.env
+    volumes:
+      - ./sql:/opt/proyecto/sql:ro
+
+  hive-metastore:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    platform: linux/amd64
+    container_name: dl-hive-metastore
+    restart: unless-stopped
+    command: /opt/hive/bin/hive --service metastore
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870 datanode:9864 hive-metastore-postgresql:5432"
+    env_file: ./docker/hadoop-hive.env
+
+  hive-metastore-postgresql:
+    image: bde2020/hive-metastore-postgresql:2.3.0
+    platform: linux/amd64
+    container_name: dl-hive-metastore-postgresql
+    restart: unless-stopped
+    volumes:
+      - hive_metastore:/var/lib/postgresql/data
+
+  # ------------------------------------------------------------- Dashboard
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard/Dockerfile
+    image: datalake-dashboard:latest
+    container_name: dl-dashboard
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./scripts/resultados:/datos:ro
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hive_metastore:
